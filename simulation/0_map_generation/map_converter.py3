@@ -113,7 +113,7 @@ def map_converter(map_name, map_image, map_yaml):
 
     # 3. Convert the image to grayscale
     map_img = raw_map_img.copy()
-    map_img[map_img <= 210.] = 0
+    map_img[map_img <= 255. * (1. - cfg["free_thresh"])] = 0
     map_img[map_img > 0.0] = 1
     printv("Free space ratio:", numpy.sum(map_img > 0.0) / numpy.size(map_img))
     savevv(map_img, "grayscale.png")
