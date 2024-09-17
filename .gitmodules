@@ -1,3 +1,6 @@
 [submodule "simulation/global_racetrajectory_optimization"]
 	path = simulation/global_racetrajectory_optimization
 	url = https://github.com/CTU-IIG/global_racetrajectory_optimization
+[submodule "simulation/trajectory_planning_helpers"]
+	path = simulation/trajectory_planning_helpers
+	url = https://github.com/CTU-IIG/trajectory_planning_helpers
