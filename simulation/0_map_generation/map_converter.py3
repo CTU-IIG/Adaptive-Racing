@@ -50,7 +50,7 @@ PARSER.add_argument(
     "--threshold",
 
     help = "Threshold value for edt.",
-    default = 0.2,
+    default = 0.17,
     type = float,
 )
 
