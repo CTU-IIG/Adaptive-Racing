@@ -25,3 +25,8 @@ outputs/cgs_mincurv_f110.csv:
 
 outputs/cgs_mincurv_iqp_f110.csv:
 	./run_optimization.py3 --model params/f110.ini --opt_type mincurv_iqp --inputs_folder ../global_racetrajectory_optimization --output cgs_mincurv_iqp_f110 --save-plot ../0_map_generation/CG_Speedway_1
+
+
+clean:
+	cd outputs && rm -f *png *csv
+	rmdir outputs --ignore-fail-on-non-empty
