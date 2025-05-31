@@ -4,3 +4,6 @@
 [submodule "simulation/trajectory_planning_helpers"]
 	path = simulation/trajectory_planning_helpers
 	url = https://github.com/CTU-IIG/trajectory_planning_helpers
+[submodule "simulation/ng_trajectory"]
+	path = simulation/ng_trajectory
+	url = https://github.com/CTU-IIG/ng_trajectory
