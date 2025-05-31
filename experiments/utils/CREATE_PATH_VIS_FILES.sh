@@ -1,0 +1,1 @@
+i=1 rostopic echo -p -b "$1".bag /path/visualization | sed 1d | { while read line; do echo -n "$line" | cut -d, -f5- | sed 's/,/\n/10;P;D' | cut -d, -f4-5 > "$1".path.visualization."$i".csv; i=$((i+1)); done }
