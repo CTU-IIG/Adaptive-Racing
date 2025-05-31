@@ -1,0 +1,1 @@
+ls -1 *csv.mae.csv | sed 's/.tracking_error.csv.mae.csv//g' | { while read line; do paste -d, <(wc -l "$line".tracking_error.csv.mae.csv | cut -d' ' -f1 | xargs seq 1) "$line".tracking_error.csv.mae.csv > "$line".mae.csv; done }

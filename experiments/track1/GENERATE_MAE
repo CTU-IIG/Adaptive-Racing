@@ -1,0 +1,1 @@
+ls -1 *tracking_error.csv | { while read fff; do cat "$fff" | sed 1d | cut -d, -f2- | { while read line; do echo "$line" | xargs -I'{}' python -c "import numpy; print(numpy.abs(eval('[{}]')).mean())"; done } > "$fff".mae.csv; done }
