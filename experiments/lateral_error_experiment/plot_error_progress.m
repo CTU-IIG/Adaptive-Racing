@@ -1,6 +1,6 @@
 % This is to show the effect of ILC
 % So I do this on bags purely changing e, not v
-stump = "alt_trajectory_error_computed_novelocity";
+stump = "lateral_error_experiment";
 errors = load(sprintf("%s_ferror.csv", stump));
 len = ceil(max(errors(:, 2)));
 fprintf("Estimated trajectory length: %d\n", len);
