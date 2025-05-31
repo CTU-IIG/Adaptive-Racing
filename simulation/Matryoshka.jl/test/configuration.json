@@ -1,0 +1,62 @@
+{
+    "_version": 2,
+    "_comment": "Example of configuration file for Matryoshka mapping.",
+    "loops": 2,
+    "groups": 10,
+    "interpolator": "cubic_spline",
+    "segmentator": "flood_fill",
+    "selector": "uniform",
+    "cascade": [
+        {
+            "algorithm": "matryoshka",
+            "budget": 10,
+            "layers": 5,
+            "criterion": "profile",
+            "criterion_args": {
+                "overlap": 100
+            },
+            "criterion_init": {
+                "_dummy": 0
+            }
+        },
+        {
+            "algorithm": "matryoshka",
+            "budget": 10,
+            "layers": 5,
+            "criterion": "profile",
+            "criterion_args": {
+                "overlap": 100
+            },
+            "criterion_init": {
+                "_dummy": 0
+            },
+            "segmentator": "flood_fill",
+            "segmentator_args": {
+                "range_limit": 1
+            }
+        }
+    ],
+    "start_points": "ng_start_points_torino2.npy",
+    "valid_points": "ng_valid_points_torino2.npy",
+    "logging_verbosity": 2,
+    "hold_map": true,
+    "plot": true,
+    "plot_args": [
+        {
+            "_figure": {
+                "function": "axis",
+                "_args": [ "equal" ]
+            },
+            "trackPlot": [ "@track" ]
+        },
+        {
+            "pointsPlot": {
+                "_args": [ "@result" ]
+            },
+            "pointsScatter": {
+                "_args": [ "@rcandidate" ]
+            }
+        }
+    ],
+    "prefix": "example"
+}

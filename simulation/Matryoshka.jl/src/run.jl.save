@@ -1,0 +1,385 @@
+
+using JSON # print, parse, parsefile, json
+import NPZ: npzread
+using Printf # @printf, @sprintf, Format, format
+#using Plots
+using Gnuplot # @gp, palette # For some reason cannot be imported this way.
+import PkgVersion: Version
+import Colors: @colorant_str
+
+f_helper(x) = x
+f_helper(x::Vector) = [f_helper(e) for e in x]
+f_helper(d::Dict) = Dict(Symbol(k) => f_helper(v) for (k, v) in d)
+symbol_dict(d::Dict) = f_helper(d)
+
+CONFIGURATION = nothing
+REAL_LOG = true
+
+
+"Loads a configuration stored in 'filename'."
+function configuration_load(filename)
+
+    global CONFIGURATION
+
+    conf = nothing
+
+    try
+        conf = symbol_dict(JSON.parsefile(filename))
+
+        if get(conf, :_version, 1) < 2
+            println(stderr, "Unsupported version of the configuration file.")
+        else
+            CONFIGURATION = conf
+        end
+    catch e
+        println(e)
+        return false
+    end
+
+    if get(conf, :logging_verbosity, 1) > 1
+        JSON.print(CONFIGURATION)
+    end
+
+    return true
+end
+
+
+function configuration_set(conf)
+    global CONFIGURATION = conf
+    return true
+end
+
+
+@noinline function cascade_run(track, fileformat, notification, loop_i, loop_output)#, conf...)
+    @show conf = CONFIGURATION
+    # Cascade step timing
+    @show step_time = 0#@elapsed begin
+
+    # Get configuration for current step
+    @show _alg = merge(conf, loop_i[2])
+
+    # Rename output from previous stages
+    fitness, rcandidate, tcandidate, result = loop_output
+
+    # Check for logging file
+    # If exists, we continue to next round.
+    if fileformat !== nothing && REAL_LOG
+        try
+            _stored = Dict{String, Any}()
+
+            for line in eachline(Printf.format(Printf.Format(fileformat), loop_i[1]) * @sprintf("-%s.log", get(_alg, :algorithm, "")))
+                if startswith(line, "#")
+                    name, value = split(line, ":")
+                    merge!(_stored, Dict(name => JSON.parse(value)))
+                end
+            end
+
+            if _stored["#fitness"] < fitness
+                return (_stored["#fitness"],
+                    [ Float64.(v) for v in _stored["#tcandidate"] ],
+                    reduce(hcat, [ Float64.(v) for v in _stored["#rcandidate"] ])',
+                    reduce(hcat, [ Float64.(v) for v in _stored["#trajectory"] ])'
+                )
+            else
+                return loop_output
+            end
+        catch e
+        end
+    end
+
+    # Open up logging file
+    if ! REAL_LOG
+        LOGFILE = open("/dev/null", "w")
+    elseif fileformat !== nothing
+        LOGFILE = open(Printf.format(Printf.Format(fileformat), loop_i[1]) * @sprintf("-%s.log", get(_alg, :algorithm, "")), "w")
+        write(LOGFILE, JSON.json(_alg))
+        @printf(LOGFILE, "\nRunning Matryoshka.jl version %s\n", Version(Matryoshka))
+        flush(LOGFILE)
+    else
+        LOGFILE = stdout
+    end
+
+
+    ## Initialization
+    # Get optimizers etc.
+    # Note: This is not done here and is moved to `*_init`. Mostly because Julia has all algorithms in one file.
+
+    # Show up current progress
+    #write(LOGFILE, Printf.format(Printf.Format(notification * " %s with %s criterion (penalized by %s), int. by %s\n"), loop_i[1], get(_alg, :algorithm, ""), get(_alg, :criterion, ""), get(_alg, :penalizer, ""), get(_alg, :interpolator, "")))
+    #flush(LOGFILE)
+
+    # Initialize parts
+    selector_init(; kwargs = merge(_alg, get(_alg, :selector_init, Dict()), Dict(:logfile => LOGFILE)))
+    interpolator_init(merge(_alg, get(_alg, :interpolator_init, Dict()), Dict(:logfile => LOGFILE)))
+    segmentator_init(track, merge(_alg, get(_alg, :segmentator_init, Dict()), Dict(:logfile => LOGFILE)))
+    criterion_init(merge(_alg, get(_alg, :criterion_init, Dict()), Dict(:logfile => LOGFILE)))
+    penalizer_init(merge(_alg, get(_alg, :penalizer_init, Dict()), Dict(:logfile => LOGFILE)))
+    optimizer_init(merge(Dict(:points=>track, :group_centers=>rcandidate, :group_centerline=>result, :logfile=>LOGFILE), _alg))
+
+
+    ## Optimization
+    _fitness, _rcandidate, _tcandidate, _result = optimize()
+
+
+    ## Plot the solution
+    # Note: Dynamic plotting is not supported yet. This is the stable configuration I was using before.
+    if get(_alg, :plot, false)
+        img = map(TRACK_BITMAP.bitmap') do p p ? colorant"#eed" : colorant"white" end
+        @gp :map Gnuplot.palette(:gray1) "set size ratio -1" :-
+        @gp :- recipe(img, "dx=$(TRACK_BITMAP.p_step[1]) dy=$(TRACK_BITMAP.p_step[2]) origin=($(TRACK_BITMAP.p_min[1]), $(TRACK_BITMAP.p_min[2]))") :-
+        @gp :- append!(_result[:, 1], _result[1, 1]) append!(_result[:, 2], _result[1, 2]) "with lines linecolor 1 title ''" :-
+        @gp :- [ _rc[1] for _rc in _rcandidate ] [ _rc[2] for _rc in _rcandidate ] "linecolor 1 linetype 1 pointsize 1.5 title ''" :-
+
+        if fileformat !== nothing
+            #save(term="pngcairo size 1280, 720 fontscale 0.8", output=Printf.format(Printf.Format(fileformat), loop_i[1]) * @sprintf("-%s.png", get(_alg, :algorithm, "")))
+        else
+            # Figure out a way to pause the execution here, until the figure is closed.
+            @gp :-
+        end
+    end
+
+    @show _fitness
+    ## End parts
+    if fileformat !== nothing
+        # Show all results of optimize function (log only)
+        #@printf(LOGFILE, "#fitness:%.14f\n", _fitness)
+        #@printf(LOGFILE, "#rcandidate:%s\n", _rcandidate)
+        #@printf(LOGFILE, "#tcandidate:%s\n", string([ _tcandidate[i, :] for i in range(1, length(_tcandidate[:, 1])) ]))
+        #@printf(LOGFILE, "#trajectory:%s\n", string([ _result[i, :] for i in range(1, length(_result[:, 1])) ]))
+    end
+    #end #@elapsed
+    # Show up time elapsed
+    #@printf(LOGFILE, "time:%f\n", step_time)
+    #@printf(LOGFILE, "==============\n")
+
+    # Close file if opened
+    if fileformat !== nothing
+        close(LOGFILE)
+    end
+
+
+    # Store only better solution for next steps of the cascade
+    if _fitness < fitness
+        return (_fitness, _rcandidate, _tcandidate, _result)
+    else
+        return loop_output
+    end
+end
+
+@noinline function loop_cascade_run(#; track, initline,
+;fileformat = "%d", notification = "%d", loop_i= 1, loop_output=nothing)#, conf...)
+    @show ":: loop_cascade_run"
+    track = _VALID_POINTS
+    initline = _START_POINTS
+    @show fileformat
+    @show notification
+    @show loop_i
+    @show loop_output
+    @show conf = CONFIGURATION
+
+    # Cascade timing
+    @show cascade_time = 0#@elapsed begin
+
+    # Initial solution
+    @show fitness = 10000000
+    @show result = initline
+    @show rcandidate = initline
+    @show tcandidate = [0.5 for _ in 1:size(initline, 1)*2]
+    @printf "%s\n" "Test 1"
+    # Update logging file
+    _fileformat = nothing
+    if fileformat !== nothing
+        #_fileformat = Printf.format(Printf.Format(fileformat), loop_i) * @sprintf("-%%0%dd", length(string(length(conf[:cascade]))))
+        _fileformat = "A%d"
+    end
+
+    notification = Printf.format(Printf.Format(notification), loop_i) * @sprintf(" Running step %%d/%d", length(conf[:cascade]))
+    @show notification
+
+    # Run cascade
+    cascade_output = nothing
+    #for i in enumerate(conf[:cascade])
+        cascade_output = cascade_run(
+            track,
+            _fileformat,
+            notification,
+            (1, conf[:cascade][1]),
+            cascade_output === nothing ? (fitness, rcandidate, tcandidate, result) : cascade_output
+        )
+    #end
+
+    #end #@elapsed
+
+
+    if fileformat !== nothing
+        #open(Printf.format(Printf.Format(fileformat), loop_i) * ".log", "w") do logfile
+        #    @printf(logfile, "timeA:%f\n", cascade_time)
+        #end
+    else
+        #@printf("timeA:%f\n", cascade_time)
+    end
+
+    if loop_output === nothing || cascade_output[1] < loop_output[1]
+        return cascade_output
+    else
+        return loop_output
+    end
+end
+
+function variate_run(; fileformat, notification, loop_i, loop_output, conf...)
+
+    # Group timing
+    variate_time = @elapsed begin
+
+    # Local variables
+    _i = loop_i[1]
+    _param = loop_i[2][1]
+    _value = loop_i[2][2]
+
+    # Update logging file
+    if fileformat !== nothing
+        # Fill group count, and add format for number of loops
+        fileformat = Printf.format(Printf.Format(fileformat), _value) * @sprintf("-%%0%dd", length(string(CONFIGURATION[:loops])))
+    end
+
+    # Update notification
+    # Fill loop index, group count and prepare loops progress
+    notification = Printf.format(Printf.Format(notification), _i, _value, _param) * @sprintf(" [%%d / %d]", CONFIGURATION[:loops])
+
+    cascade_output = nothing
+
+    ## Loop cascade
+    for i in 1:conf[:loops]
+        cascade_output = loop_cascade_run(
+            fileformat=fileformat,
+            notification=notification,
+            loop_i=i,
+            loop_output=cascade_output;
+            merge(conf, Dict(Symbol(_param) => _value))...
+        )
+    end
+
+    end #@elapsed
+
+    @printf("Variating %s %s finished in %fs.\n", _param, _value, variate_time)
+
+    if loop_output === nothing || cascade_output[1] < loop_output[1]
+        return cascade_output
+    else
+        return loop_output
+    end
+end
+
+function execute(START_POINTS=nothing, VALID_POINTS=nothing)
+
+    global CONFIGURATION, REAL_LOG
+    global _START_POINTS, _VALID_POINTS
+
+    println("Starting Matryoshka.jl version ", Version(Matryoshka))
+
+    # Overall time
+    overall_time = 0#@elapsed begin
+
+    # Load data about the track
+    if START_POINTS === nothing
+        START_POINTS = npzread(CONFIGURATION[:start_points])
+    end
+    if VALID_POINTS === nothing
+        VALID_POINTS = npzread(CONFIGURATION[:valid_points])
+    end
+    #@show START_POINTS
+    #@show VALID_POINTS
+    _START_POINTS = START_POINTS
+    _VALID_POINTS = VALID_POINTS
+
+    # Logging file format
+    fileformat = nothing
+    if haskey(CONFIGURATION, :prefix)
+        fileformat = @sprintf("%s", CONFIGURATION[:prefix])
+    end
+    @show fileformat
+
+    if get(CONFIGURATION, :_debug, false)
+        REAL_LOG = false
+    end
+
+    # Notification about progress
+    notification = ""
+
+    solution = nothing
+
+    # Identify and prepare variating variable
+    if haskey(CONFIGURATION, :variate) && haskey(CONFIGURATION, Symbol(CONFIGURATION[:variate]))
+        param = CONFIGURATION[:variate]
+        values = CONFIGURATION[Symbol(param)]
+
+        # Force list
+        if !(values isa Array{<:Number})
+            values = [values]
+        end
+
+        # Convert to tuples
+        tvalues = [(param, value) for value in values]
+
+        # Add variate to the file format
+        if fileformat !== nothing
+            if all(typeof(_value) == Int for _value in values)
+                fileformat = fileformat * @sprintf("-%%0%dd", length(string(maximum(values))))
+            else
+                fileformat = fileformat * "-%s"
+            end
+        end
+
+        # ... and also to the notification
+        notification = notification * @sprintf("{%%d / %d (%%s %%s)}", length(values))
+
+        ## And variate the parameter
+        solution = nothing
+        for i in enumerate(tvalues)
+            solution = variate_run(
+                track=VALID_POINTS,
+                initline=START_POINTS,
+                fileformat=fileformat,
+                notification=notification,
+                loop_i=i,
+                loop_output=solution;
+                CONFIGURATION...
+            )
+        end
+
+    else
+        # Skip to the loop
+        # Update logging file
+        if fileformat !== nothing
+            fileformat = fileformat * @sprintf("-%%0%dd", length(string(CONFIGURATION[:loops])))
+        end
+
+        # Update notification
+        notification = notification * @sprintf("[%%d / %d]", CONFIGURATION[:loops])
+        @show notification
+        ## Loop cascade
+        solution = nothing
+        #for i in 1:CONFIGURATION[:loops]
+        #    @show i
+            solution = loop_cascade_run()
+                #track=VALID_POINTS,
+                #initline=START_POINTS,
+                #fileformat=fileformat,
+                #notification=notification,
+                #loop_i=1,
+                #loop_output=solution#;
+                #CONFIGURATION...
+            #)
+        #end
+    end
+
+    #end #@elapsed
+
+    #@printf("Optimization finished in %fs.\n", overall_time)
+
+    return solution
+end
+
+if (abspath(PROGRAM_FILE) == @__FILE__)
+    println(execute())
+end
